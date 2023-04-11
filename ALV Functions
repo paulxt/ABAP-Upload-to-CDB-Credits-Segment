@@ -1,0 +1,222 @@
+*&---------------------------------------------------------------------*
+*& INCLUDE        
+*&---------------------------------------------------------------------*
+FORM build_event .
+    w_event-form = w_event-name = 'TOP_OF_PAGE'.
+    APPEND w_event TO t_events.
+ENDFORM.
+FORM top_of_page.
+    CALL FUNCTION 'REUSE_ALV_COMMENTARY_WRITE'
+      EXPORTING
+*       i_logo             = 'ENJOYSAP_LOGO'
+        it_list_commentary = t_top_of_page.
+ENDFORM.                    "top_of_page
+*&---------------------------------------------------------------------*
+*&      Form  BUILD_TOP_OF_PAGE_DATA
+*&---------------------------------------------------------------------*
+FORM build_top_of_page_data .
+    DATA: l_text(40),
+          l_fdt(10),
+          l_tdt(10).
+    REFRESH t_top_of_page.
+
+    CLEAR w_top_of_page.
+    w_top_of_page = 'H' .   " H = Header, S = Selection, A = Action
+*    w_top_of_page-info = sy-title.
+    CONCATENATE sy-title '(' w_lines ')' INTO l_text.
+    w_top_of_page-info = l_text.
+    APPEND w_top_of_page TO t_top_of_page.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  FIELDCAT_INIT
+*&---------------------------------------------------------------------*
+FORM fieldcat_init  USING  t_fieldcat TYPE lvc_t_fcat
+                           t_sortable TYPE lvc_t_sort.
+
+      "Delete
+      wa_fieldcat-col_pos   = wa_fieldcat-col_pos + 1.
+      wa_fieldcat-tabname   = 'T_DATA'.
+      wa_fieldcat-fieldname = 'FLAG'.
+      wa_fieldcat-checkbox = 'X'.
+      wa_fieldcat-edit = 'X'.
+      wa_fieldcat-coltext = text-d16.
+      APPEND wa_fieldcat TO t_fieldcat.
+      CLEAR wa_fieldcat.
+
+      PERFORM fieldcat_append USING 'KUNNR' 'KNA1' 'KUNNR' text-d01.
+      PERFORM fieldcat_append USING 'NAME' space space text-d02.
+      PERFORM fieldcat_append USING 'SORTL' 'KNA1' 'SORTL' text-d03.
+      PERFORM fieldcat_append USING 'CREDIT_SGMNT' space space text-d04.
+      PERFORM fieldcat_append USING 'CREDIT_SGMNT_TXT' space space text-d05.
+      PERFORM fieldcat_append USING 'VKORG' 'KNB1' 'BUKRS' text-d06.
+      PERFORM fieldcat_append USING 'SPART' 'KNVV' 'SPART' text-d07.
+      PERFORM fieldcat_append USING 'VTEXT' space space text-d08.
+      PERFORM fieldcat_append USING 'WAERS' 'KNVV' 'WAERS' text-d09.
+      PERFORM fieldcat_append USING 'CREDIT_LIMIT' space space text-d10.
+      PERFORM fieldcat_append USING 'CREDIT_ACTUAL' space space text-d11.
+      PERFORM fieldcat_append USING 'DATUM' space space text-d12.
+      PERFORM fieldcat_append USING 'UZEIT' space space text-d13.
+      PERFORM fieldcat_append USING 'STATUS' space space text-d14.
+      PERFORM fieldcat_append USING 'ERROR_MESSAGE' space space text-d15.
+
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  fieldcat_append
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM fieldcat_append USING l_field l_rtable l_rfield l_text.
+      CLEAR wa_fieldcat.
+
+      wa_fieldcat-col_pos   = wa_fieldcat-col_pos + 1.
+
+      wa_fieldcat-tabname   = 'T_DATA'.
+      wa_fieldcat-fieldname = l_field.
+      wa_fieldcat-ref_table = l_rtable.
+      wa_fieldcat-ref_field = l_rfield.
+      wa_fieldcat-coltext = l_text.
+
+      APPEND wa_fieldcat TO t_fieldcat.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  DISPLAY_ALV
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM display_alv .
+
+    "Assure Status
+    LOOP AT  t_data INTO wa_data.
+        TRY.
+            EXEC SQL.
+                SELECT  m_RETURN_CODE
+                  FROM SAP_KNA1
+                  INTO :wa_data-status
+                  WHERE m_KUNNR = :wa_data-kunnr
+                  AND m_BUKRS = :wa_data-vkorg
+                  AND m_SPART = :wa_data-spart
+            ENDEXEC.
+        CATCH cx_sy_native_sql_error INTO exc_ref.
+              error_text = exc_ref->get_text( ).
+        ENDTRY.
+
+        CLEAR : ls_stylerow, wa_data-style.
+        ls_stylerow-fieldname = 'FLAG'.
+        IF wa_data-status = 'IP'.
+          ls_stylerow-style = cl_gui_alv_grid=>mc_style_disabled.
+        ENDIF.
+        APPEND ls_stylerow TO wa_data-style.
+
+        MODIFY t_data FROM wa_data.
+    ENDLOOP.
+
+    gs_layout-cwidth_opt = w_settings-no_colwopt = 'X'.
+    gs_layout-stylefname = 'STYLE'.
+
+    CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY_LVC'
+     EXPORTING
+       I_CALLBACK_PROGRAM                = sy-cprog
+       I_CALLBACK_PF_STATUS_SET          = 'SET_PF_STATUS'
+       I_CALLBACK_USER_COMMAND           = 'USER_COMMAND'
+*       I_CALLBACK_TOP_OF_PAGE            = ' '
+       I_BACKGROUND_ID                   = 'ALV_BACKGROUND'
+       I_GRID_SETTINGS                   = w_settings
+       IS_LAYOUT_LVC                     = gs_layout
+       IT_FIELDCAT_LVC                   = t_fieldcat[]
+       IT_SORT_LVC                       = t_sortable[]
+       I_SAVE                            = 'A'
+       IT_EVENTS                         = t_events
+      TABLES
+        t_outtab                          = t_data
+     EXCEPTIONS
+       PROGRAM_ERROR                     = 1
+       OTHERS                            = 2.
+
+ENDFORM.
+FORM set_pf_status USING rt_extab TYPE slis_t_extab.
+    PERFORM adapt_excluding_tab IN PROGRAM saplslvc_fullscreen CHANGING rt_extab[] IF FOUND.
+    SET PF-STATUS 'ZFULLSCREEN' EXCLUDING rt_extab[].
+ENDFORM.
+FORM user_command USING lv_okcode LIKE sy-ucomm l_selfield TYPE slis_selfield.
+    lv_okcode = sy-ucomm.
+    CLEAR sy-ucomm.
+    "Connect to the outer CDB
+    PERFORM connect.
+
+    "Execute to Delete
+    CASE lv_okcode.
+      WHEN 'EXECUTE'.
+        "Refresh the table (flag賦予'X')
+        DATA ls_ref1 TYPE REF TO cl_gui_alv_grid .
+        CALL FUNCTION 'GET_GLOBALS_FROM_SLVC_FULLSCR'
+        IMPORTING
+          e_grid = ls_ref1.
+        CALL METHOD ls_ref1->check_changed_data .
+
+        "Put the Data in for Deleting
+        LOOP AT t_data INTO wa_data WHERE flag = 'X'.
+            lwa_del = wa_data.
+            CLEAR wa_data.
+            APPEND lwa_del TO lt_del.
+            CLEAR lwa_del.
+        ENDLOOP.
+        "Delete data in itab (number)
+        DELETE t_data WHERE flag = 'X'.
+
+        "Delete Data in CDB
+        LOOP AT lt_del INTO lwa_del.
+            TRY .
+                EXEC SQL.
+                    DELETE FROM SAP_CREDIT WHERE m_KUNNR = :lwa_del-kunnr
+                                    AND m_BUKRS = :lwa_del-vkorg
+                                    AND m_SPART = :lwa_del-spart
+                ENDEXEC.
+                EXEC SQL.
+                    COMMIT
+                ENDEXEC.
+            CATCH cx_sy_native_sql_error INTO exc_ref.
+              error_text = exc_ref->get_text( ).
+            ENDTRY.
+        ENDLOOP.
+
+        REFRESH lt_del.
+
+       "REFRESH
+        PERFORM connect.
+        REFRESH t_data.
+        PERFORM access_data.
+        IF t_data[] IS NOT INITIAL.
+            PERFORM build_event.
+            PERFORM build_top_of_page_data.
+            PERFORM fieldcat_init USING t_fieldcat[] t_sortable.
+            PERFORM display_alv.
+        ELSE.
+            MESSAGE s999.
+        ENDIF.
+        PERFORM disconnect.
+
+      WHEN 'REFRESH'.
+            PERFORM connect.
+            REFRESH t_data.
+            PERFORM access_data.
+            IF t_data[] IS NOT INITIAL.
+                PERFORM build_event.
+                PERFORM build_top_of_page_data.
+                PERFORM fieldcat_init USING t_fieldcat[] t_sortable.
+                PERFORM display_alv.
+            ELSE.
+                MESSAGE s999.
+            ENDIF.
+        PERFORM disconnect.
+      WHEN OTHERS.
+    ENDCASE.
+
+    PERFORM disconnect.
+ENDFORM.

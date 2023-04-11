@@ -1,0 +1,660 @@
+REPORT 510 MESSAGE-ID zsd.
+************************************************************************
+* Description  : 客戶信用額度上傳與查詢CDB
+************************************************************************
+INCLUDE zrsdsd510top.
+INCLUDE zrsdsd510f99.
+***********************************************************************
+* INITIALIZATION
+***********************************************************************
+INITIALIZATION.
+   "GIve Default
+    SELECT bname parid parva FROM usr05 INTO CORRESPONDING FIELDS OF TABLE t_usr05
+      WHERE bname = sy-uname.
+*    CLEAR wa_usr05.
+*    READ TABLE t_usr05 INTO wa_usr05 WITH KEY parid = 'VKO'.
+*    IF wa_usr05-parva IS NOT INITIAL.
+*        p_vkorg = wa_usr05-parva.
+*        p_vkorg2-low = wa_usr05-parva.
+*        APPEND p_vkorg2.
+*    ENDIF.
+
+    SELECT * FROM ukmcred_sgm0t INTO CORRESPONDING FIELDS OF TABLE t_cre WHERE langu = sy-langu.
+    PERFORM build_user_drop_down_list.
+
+    "drop-down for Mode Upload
+    IF p_cre IS NOT INITIAL.
+        s_cre-sign = 'I'.
+        s_cre-option = 'BT'.
+        s_cre-low = p_cre.
+        s_cre-high = p_cre2.
+        APPEND s_cre.
+    ENDIF.
+
+    "drop-down for Mode Search
+    IF p_cre3 IS NOT INITIAL.
+        s_cre2 = 'I'.
+        s_cre-low = p_cre3.
+        APPEND s_cre2.
+    ENDIF.
+***********************************************************************
+*AT SELECTION SCREEN
+***********************************************************************
+AT SELECTION-SCREEN OUTPUT.
+    IF p_upload = 'X'.
+        LOOP AT SCREEN.
+            IF screen-group1 = 'G1'.
+                screen-active = '1'.
+            ELSEIF screen-group1 = 'G2'.
+                screen-active = '0'.
+            ENDIF.
+            MODIFY SCREEN.
+        ENDLOOP.
+    ELSEIF p_search = 'X'.
+        LOOP AT SCREEN.
+            IF screen-group1 = 'G2'.
+                screen-active = '1'.
+            ELSEIF screen-group1 = 'G1'.
+                screen-active = '0'.
+            ENDIF.
+            MODIFY SCREEN.
+        ENDLOOP.
+    ENDIF.
+***********************************************************************
+* Start-of-selection PAUL
+***********************************************************************
+START-OF-SELECTION.
+    IF p_upload = 'X'.
+        PERFORM read_data.
+    ENDIF.
+***********************************************************************
+* End-of-selection PAUL
+***********************************************************************
+END-OF-SELECTION.
+    IF p_upload = 'X'.
+        IF t_print[] IS NOT INITIAL .
+            PERFORM connect.
+            IF w_success_con = 'X'.
+                PERFORM output_data.
+            ENDIF.
+            PERFORM disconnect.
+        ELSE.
+            MESSAGE s999.
+        ENDIF.
+    ELSEIF p_search = 'X'.
+        PERFORM connect.
+        IF w_success_con = 'X'.
+            PERFORM access_data.
+        ENDIF.
+        PERFORM disconnect.
+
+        IF t_data[] IS NOT INITIAL.
+            PERFORM build_event.
+            PERFORM build_top_of_page_data.
+            PERFORM fieldcat_init USING t_fieldcat[] t_sortable.
+            PERFORM display_alv.
+        ELSE.
+            MESSAGE s999.
+        ENDIF.
+    ENDIF.
+*&---------------------------------------------------------------------*
+*& Form read_data
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM read_data .
+    "Decide to write LOG
+    SELECT * FROM zutm10 INTO TABLE t_zutm10.
+    READ TABLE t_zutm10 INTO wa_zutm10 WITH KEY sysvr = 'ZSD6B_LOG'.
+    IF wa_zutm10-alpvl = 'Y'.
+        PERFORM get_component_list USING 'WA_PRINT' CHANGING t_component[].
+    ENDIF.
+
+    "Catch name of the division
+    SELECT spart vtext INTO CORRESPONDING FIELDS OF TABLE t_tspat
+      FROM tspat WHERE spras = sy-langu.
+
+    "Catch Credit Segment
+    SELECT s~partner s~credit_sgmnt s~credit_limit t~credit_sgmnt_txt INTO CORRESPONDING FIELDS OF TABLE t_credit
+      FROM ukmbp_cms_sgm AS s
+      JOIN ukmcred_sgm0t AS t
+      ON s~credit_sgmnt = t~credit_sgmnt
+      WHERE s~credit_sgmnt IN s_cre.
+
+    "Main DATA
+    SELECT a~kunnr a~sortl v~waers v~vkorg v~spart INTO CORRESPONDING FIELDS OF TABLE t_print
+      FROM kna1 AS a
+      JOIN knvv AS v
+      ON a~kunnr = v~kunnr
+      WHERE a~kunnr IN s_kunnr
+      AND v~kunnr IN s_kunnr.
+
+      "Name of Customer
+      IF  t_print IS NOT INITIAL.
+         SELECT kunnr name1 name2 INTO CORRESPONDING FIELDS OF TABLE t_kna1
+           FROM kna1
+           FOR ALL ENTRIES IN t_print
+           WHERE kunnr = t_print-kunnr.
+      ENDIF.
+
+    PERFORM get_desc.
+
+    SORT t_print BY kunnr.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form get_desc
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM get_desc .
+    CLEAR: wa_print.
+    LOOP AT t_print INTO wa_print.
+        "Date and Time
+        wa_print-datum = sy-datum.
+        CONCATENATE sy-uzeit+0(2) ':' sy-uzeit+2(2) ':' sy-uzeit+4(2) INTO wa_print-uzeit.
+
+        "name of division
+        CLEAR wa_tspat.
+        READ TABLE t_tspat INTO wa_tspat WITH KEY spart = wa_print-spart.
+        wa_print-vtext = wa_tspat-vtext.
+
+        "Credit Segment,  Credit Limit
+        CLEAR wa_credit.
+        READ TABLE t_credit INTO wa_credit WITH KEY partner = wa_print-kunnr.
+        wa_print-credit_sgmnt = wa_credit-credit_sgmnt.
+        wa_print-credit_sgmnt_txt = wa_credit-credit_sgmnt_txt .
+        wa_print-credit_limit = wa_credit-credit_limit.
+
+        "Full Name of Customer
+        CLEAR wa_kna1.
+        READ TABLE t_kna1 INTO wa_kna1 WITH KEY kunnr = wa_print-kunnr.
+        CONCATENATE wa_kna1-name1 wa_kna1-name2 INTO wa_print-name SEPARATED BY space.
+
+        "Catch credit exposure
+        CALL FUNCTION 'UKM_COMMTS_BUPA_DISPLAY'
+          EXPORTING
+            i_partner = wa_print-kunnr
+            i_segment = wa_print-credit_sgmnt
+            i_date = sy-datum
+          IMPORTING
+            e_amount_l = wa_print-credit_actual.
+
+        wa_print-credit_limit = wa_print-credit_limit * 100.
+        wa_print-credit_actual = wa_print-credit_actual * 100.
+
+        MODIFY t_print FROM wa_print.
+        CLEAR wa_print.
+    ENDLOOP.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form output_data
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM output_data .
+    LOOP AT t_print INTO wa_print WHERE credit_sgmnt IS NOT INITIAL.
+        IF wa_print IS INITIAL.
+            wa_print = ' '.
+        ENDIF.
+
+        TRY.
+            EXEC SQL.
+                SELECT  m_RETURN_CODE
+                  FROM SAP_KNA1
+                  INTO :wa_print-status
+                  WHERE m_KUNNR = :wa_print-kunnr
+            ENDEXEC.
+        CATCH cx_sy_native_sql_error INTO exc_ref.
+              error_text = exc_ref->get_text( ).
+        ENDTRY.
+
+        IF wa_print-status = 'IP'.
+            wa_print-error_message = text-004.
+            EXIT.
+        ENDIF.
+        TRY.
+            EXEC SQL.
+                UPDATE SAP_CREDIT
+                  SET   m_KUNNR = CASE
+                                    WHEN :WA_PRINT-KUNNR <> ' ' THEN :WA_PRINT-KUNNR
+                                    ELSE ' '
+                                  END,
+                        m_NAME = CASE
+                                     WHEN :WA_PRINT-NAME <> ' ' THEN :WA_PRINT-NAME
+                                     ELSE ' '
+                                 END,
+                        m_BU_SORT1_TXT = CASE
+                                           WHEN :WA_PRINT-SORTL <> ' ' THEN :WA_PRINT-SORTL
+                                           ELSE ' '
+                                         END,
+                        m_SEGMENT = CASE
+                                      WHEN :WA_PRINT-CREDIT_SGMNT <> ' ' THEN :WA_PRINT-CREDIT_SGMNT
+                                      ELSE ' '
+                                    END,
+                        m_SEGMENT_NAME = CASE
+                                           WHEN :WA_PRINT-CREDIT_SGMNT_TXT <> ' ' THEN :WA_PRINT-CREDIT_SGMNT_TXT
+                                           ELSE ' '
+                                         END,
+                        m_BUKRS = CASE
+                                    WHEN :WA_PRINT-VKORG <> ' ' THEN :WA_PRINT-VKORG
+                                    ELSE ' '
+                                  END,
+                        m_SPART = CASE
+                                    WHEN :WA_PRINT-SPART <> ' ' THEN :WA_PRINT-SPART
+                                    ELSE ' '
+                                  END,
+                        m_SPART_NAME = CASE
+                                         WHEN :WA_PRINT-VTEXT <> ' ' THEN :WA_PRINT-VTEXT
+                                         ELSE ' '
+                                       END,
+                        m_WAERS = CASE
+                                    WHEN :WA_PRINT-WAERS <> ' ' THEN :WA_PRINT-WAERS
+                                    ELSE ' '
+                                  END,
+
+                        m_CREDIT_LIMIT = CASE
+                                           WHEN :WA_PRINT-CREDIT_LIMIT <> '0' THEN :WA_PRINT-CREDIT_LIMIT
+                                           ELSE '0'
+                                         END,
+                        m_CREDIT_ACTUAL = CASE
+                                            WHEN :WA_PRINT-CREDIT_ACTUAL <> '0' THEN :WA_PRINT-CREDIT_ACTUAL
+                                            ELSE '0'
+                                          END,
+                        m_PROCESS_DATE = CASE
+                                           WHEN :WA_PRINT-DATUM <> ' ' THEN :WA_PRINT-DATUM
+                                           ELSE ' '
+                                         END,
+                        m_PROCESS_TIME = CASE
+                                           WHEN :WA_PRINT-UZEIT <> ' ' THEN :WA_PRINT-UZEIT
+                                           ELSE ' '
+                                         END,
+                        m_RETURN_CODE = CASE
+                                          WHEN :WA_PRINT-STATUS <> ' ' THEN :WA_PRINT-STATUS
+                                          ELSE ' '
+                                        END,
+                        m_RETURN_MESSAGE = CASE
+                                             WHEN :WA_PRINT-ERROR_MESSAGE <> ' ' THEN :WA_PRINT-ERROR_MESSAGE
+                                             ELSE ' '
+                                           END
+                        WHERE m_KUNNR = :wa_print-kunnr
+                         AND m_BUKRS = :wa_print-vkorg
+                         AND m_SPART = :wa_print-spart
+            ENDEXEC.
+            IF sy-subrc = 0.
+                w_suc = w_suc + 1.
+                PERFORM write_log USING 'C' space.
+                EXEC SQL.
+                    COMMIT
+                ENDEXEC.
+            ELSE.
+                EXEC SQL.
+                    INSERT INTO SAP_CREDIT VALUES (
+                        CASE
+                          WHEN :WA_PRINT-KUNNR <> ' ' THEN :WA_PRINT-KUNNR
+                          ELSE ' '
+                        END,
+                        CASE
+                          WHEN :WA_PRINT-NAME <> ' ' THEN :WA_PRINT-NAME
+                          ELSE ' '
+                        END,
+                        CASE
+                          WHEN :WA_PRINT-SORTL <> ' ' THEN :WA_PRINT-SORTL
+                          ELSE ' '
+                        END,
+                        CASE
+                          WHEN :WA_PRINT-CREDIT_SGMNT <> ' ' THEN :WA_PRINT-CREDIT_SGMNT
+                          ELSE ' '
+                        END,
+                        CASE
+                          WHEN :WA_PRINT-CREDIT_SGMNT_TXT <> ' ' THEN :WA_PRINT-CREDIT_SGMNT_TXT
+                          ELSE ' '
+                        END,
+                        CASE
+                          WHEN :WA_PRINT-VKORG <> ' ' THEN :WA_PRINT-VKORG
+                          ELSE ' '
+                        END,
+                        CASE
+                          WHEN :WA_PRINT-SPART <> ' ' THEN :WA_PRINT-SPART
+                          ELSE ' '
+                        END,
+                        CASE
+                          WHEN :WA_PRINT-VTEXT <> ' ' THEN :WA_PRINT-VTEXT
+                          ELSE ' '
+                        END,
+                        CASE
+                          WHEN :WA_PRINT-WAERS <> ' ' THEN :WA_PRINT-WAERS
+                          ELSE ' '
+                        END,
+                        CASE
+                          WHEN :WA_PRINT-CREDIT_LIMIT <> '0' THEN :WA_PRINT-CREDIT_LIMIT
+                          ELSE '0'
+                        END,
+                        CASE
+                          WHEN :WA_PRINT-CREDIT_ACTUAL <> '0' THEN :WA_PRINT-CREDIT_ACTUAL
+                          ELSE '0'
+                        END,
+                        CASE
+                          WHEN :WA_PRINT-DATUM <> ' ' THEN :WA_PRINT-DATUM
+                          ELSE ' '
+                        END,
+                        CASE
+                          WHEN :WA_PRINT-UZEIT <> ' ' THEN :WA_PRINT-UZEIT
+                          ELSE ' '
+                        END,
+                        CASE
+                          WHEN :WA_PRINT-STATUS <> ' ' THEN :WA_PRINT-STATUS
+                          ELSE ' '
+                        END,
+                        CASE
+                          WHEN :WA_PRINT-ERROR_MESSAGE <> ' ' THEN :WA_PRINT-ERROR_MESSAGE
+                          ELSE ' '
+                        END
+                    )
+                ENDEXEC.
+                IF sy-subrc = 0.
+                    w_suc = w_suc + 1.
+                    PERFORM write_log USING 'C' space.
+                    EXEC SQL.
+                        COMMIT
+                    ENDEXEC.
+                ELSE.
+                    MESSAGE s564(zsd) INTO error_text.
+                ENDIF.
+            ENDIF.
+        CATCH cx_sy_native_sql_error INTO exc_ref.
+              error_text = exc_ref->get_text( ).
+              WRITE / error_text.
+*              stop.
+              w_err = w_err + 1.
+              PERFORM write_log USING 'E' error_text.
+        ENDTRY.
+        w_all = w_all + 1.
+    ENDLOOP.
+    "Write Number of Success, Error, All
+    WRITE: / text-001,(5) w_suc COLOR 2,
+             text-002, w_err COLOR 3,
+             text-003 ,(5) w_all COLOR 4.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form access_data
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM access_data .
+
+    READ TABLE s_kunnr2 INDEX 1.
+    IF s_datum[] IS INITIAL.
+        s_datum-low = '00000000'.
+        s_datum-high = '99991231'.
+    ENDIF.
+
+    TRY .
+        EXEC SQL.
+            OPEN db1 FOR
+                SELECT  m_KUNNR,
+                        m_NAME,
+                        m_BU_SORT1_TXT,
+                        m_SEGMENT,
+                        m_SEGMENT_NAME,
+                        m_BUKRS,
+                        m_SPART,
+                        m_SPART_NAME,
+                        m_WAERS,
+                        m_CREDIT_LIMIT,
+                        m_CREDIT_ACTUAL,
+                        m_PROCESS_DATE,
+                        m_PROCESS_TIME,
+                        m_RETURN_CODE,
+                        m_RETURN_MESSAGE
+
+                        FROM SAP_CREDIT
+                        WHERE (m_PROCESS_DATE BETWEEN (:s_datum-low) AND (:s_datum-high))
+        ENDEXEC.
+        DO.
+            EXEC SQL.
+                FETCH NEXT db1 INTO
+                      :wa_data-kunnr,
+                      :wa_data-name,
+                      :wa_data-sortl,
+                      :wa_data-credit_sgmnt,
+                      :wa_data-credit_sgmnt_txt,
+                      :wa_data-vkorg,
+                      :wa_data-spart,
+                      :wa_data-vtext,
+                      :wa_data-waers,
+                      :wa_data-credit_limit,
+                      :wa_data-credit_actual,
+                      :wa_data-datum,
+                      :wa_data-uzeit,
+                      :wa_data-status,
+                      :wa_data-error_message
+            ENDEXEC.
+            IF sy-subrc <> 0.
+                EXIT.
+            ELSE.
+                IF wa_data-kunnr IN s_kunnr2 AND wa_data-status IN s_status.
+                  IF p_cre3 IS NOT INITIAL.
+                      IF wa_data-credit_sgmnt = p_cre3.
+                          APPEND wa_data TO t_data.
+                          CLEAR: wa_data.
+                      ENDIF.
+                  ELSE.
+                      APPEND wa_data TO t_data.
+                      CLEAR: wa_data.
+                  ENDIF.
+                ENDIF.
+            ENDIF.
+        ENDDO.
+        EXEC SQL.
+            CLOSE db1
+        ENDEXEC.
+    CATCH cx_sy_native_sql_error INTO exc_ref.
+          error_text = exc_ref->get_text( ).
+    ENDTRY.
+
+    SORT t_data BY kunnr.
+    DESCRIBE TABLE t_data LINES w_lines.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form connect
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM connect .
+    CLEAR error_text.
+
+    SELECT SINGLE alpvl INTO w_system FROM zutm10 WHERE sysvr = 'UT_DB'.
+
+    IF sy-subrc <> 0.
+        MESSAGE e114(smi_general) INTO error_text.
+    ENDIF.
+
+    TRY .
+        EXEC SQL.
+            CONNECT TO :w_system
+        ENDEXEC.
+        w_success_con = 'X'.
+    CATCH cx_sy_native_sql_error INTO exc_ref.
+           error_text = exc_ref->get_text( ).
+           w_success_con = space.
+           MESSAGE error_text TYPE 'I'.
+    ENDTRY.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form disconnect
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM disconnect .
+        CLEAR error_text.
+    IF w_success_con = 'X'.
+        TRY .
+            EXEC SQL.
+                DISCONNECT :w_system
+            ENDEXEC.
+        CATCH cx_sy_native_sql_error INTO exc_ref.
+              error_text = exc_ref->get_text( ).
+              MESSAGE error_text TYPE 'I'.
+        ENDTRY.
+        CLEAR w_success_con.
+    ENDIF.
+ENDFORM.
+************************************************************************
+* build user_drop_down_list
+************************************************************************
+FORM build_user_drop_down_list.
+
+  DATA: name TYPE vrm_id,
+        list TYPE vrm_values,
+        value LIKE LINE OF list.
+
+  CLEAR list. REFRESH list.
+
+    LOOP AT t_cre INTO wa_cre.
+        CLEAR value.
+        value-key = wa_cre-credit_sgmnt.
+        value-text = wa_cre-credit_sgmnt_txt.
+        APPEND value TO list.
+        CLEAR value.
+    ENDLOOP.
+
+*   Set the values for p_cre
+    name = 'P_CRE'.
+    CALL FUNCTION 'VRM_SET_VALUES'
+         EXPORTING
+              id     = name
+              values = list.
+
+*   Set values for p_cre2
+    name = 'P_CRE2'.
+    CALL FUNCTION 'VRM_SET_VALUES'
+         EXPORTING
+              id     = name
+              values = list.
+*   Set values for p_cre3
+    name = 'P_CRE3'.
+    CALL FUNCTION 'VRM_SET_VALUES'
+         EXPORTING
+              id     = name
+              values = list.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form GET_COMPONENT_LIST
+*&---------------------------------------------------------------------*
+FORM get_component_list  USING VALUE(l_tabname)
+                         CHANGING lt_component LIKE t_component[].
+    CALL FUNCTION 'GET_COMPONENT_LIST'
+      EXPORTING
+        program          = sy-cprog
+        fieldname        = l_tabname
+      TABLES
+        components       = lt_component.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form GET_LONG_TEXT
+*&---------------------------------------------------------------------*
+FORM get_long_text  TABLES   t_component STRUCTURE rstrucinfo
+                    USING    wa_main  text
+                    CHANGING ltext.
+    DATA: l_num     TYPE i,
+          l_text    TYPE string,
+          l_quan15  TYPE c LENGTH 15,
+          l_err     TYPE c LENGTH 500.
+    FIELD-SYMBOLS <l_field>.
+
+    ltext = text.
+
+    LOOP AT t_component INTO wa_component.
+        ADD 1 TO l_num.
+        l_text = l_num.
+        CONCATENATE '&' l_text INTO l_text.
+        CONDENSE l_text NO-GAPS.
+        ASSIGN COMPONENT wa_component-compname OF STRUCTURE wa_main TO <l_field>.
+        IF <l_field> IS ASSIGNED.
+            IF wa_component-type = 'P'.
+                l_quan15 = <l_field>.
+                REPLACE l_text INTO ltext WITH l_quan15.
+            ELSE.
+                REPLACE l_text INTO ltext WITH <l_field>.
+            ENDIF.
+        ENDIF.
+        CLEAR: l_quan15, wa_component.
+    ENDLOOP.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form WRITE_LOG
+*&---------------------------------------------------------------------*
+FORM write_log  USING   status   message.
+    DATA: lwa_zutt01  TYPE zutt01,
+          l_objectid  TYPE zutt01-objectid,
+          l_serial_no TYPE zutt01-serial_no.
+    DATA: c_tcode TYPE zutt01-tcode,
+          w_mode TYPE zutt01-zmode,
+          w_datum TYPE zutt01-process_date,
+          w_uzeit TYPE zutt01-process_time,
+          w_cond TYPE zutt01-zcondition,
+          w_ltext2 TYPE string.
+
+    c_tcode = 'ZSD6B'.
+    w_datum = sy-datum.
+    w_uzeit = sy-uzeit.
+    w_cond = 'X'.
+
+
+    IF sy-batch IS NOT INITIAL.
+        w_mode = 'D'.
+    ELSE.
+        w_mode = 'W'.
+    ENDIF.
+
+    CONCATENATE wa_print-kunnr wa_print-vkorg wa_print-spart INTO l_objectid.
+    lwa_zutt01-mandt          = sy-mandt.
+    lwa_zutt01-tcode          = c_tcode.
+    lwa_zutt01-zmode          = w_mode.
+    lwa_zutt01-objectid       = l_objectid.
+    SELECT SINGLE MAX( serial_no ) INTO l_serial_no FROM zutt01 WHERE tcode = c_tcode AND objectid = l_objectid.
+    ADD 1 TO l_serial_no.
+    lwa_zutt01-serial_no      = l_serial_no.
+    lwa_zutt01-process_date   = w_datum.
+    lwa_zutt01-process_time   = w_uzeit.
+    lwa_zutt01-process_user   = sy-uname.
+    lwa_zutt01-zcondition     = w_cond.
+    CONCATENATE sy-datum sy-uzeit INTO lwa_zutt01-update_date SEPARATED BY space.
+    lwa_zutt01-update_user    = sy-uname.
+
+    PERFORM get_long_text TABLES t_component2
+                          USING wa_print w_ltext2
+                          CHANGING lwa_zutt01-ltext.
+    IF status = 'C'.
+            lwa_zutt01-update_status = 'C'.
+    ELSE.
+        lwa_zutt01-update_status  = 'E'.
+        lwa_zutt01-err_message    = message.
+    ENDIF.
+    MODIFY zutt01 FROM lwa_zutt01.
+    CLEAR: lwa_zutt01.
+
+ENDFORM.

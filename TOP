@@ -1,0 +1,157 @@
+*&---------------------------------------------------------------------*
+*& INCLUDE      TOP
+*&---------------------------------------------------------------------*
+TABLES: kna1, knvv, ukmbp_cms_sgm.
+TYPE-POOLS: vrm.
+
+"LOG
+DATA: t_component LIKE STANDARD TABLE OF rstrucinfo,
+      t_component2 LIKE STANDARD TABLE OF rstrucinfo,
+      wa_component LIKE rstrucinfo,
+      wa_component2 LIKE rstrucinfo.
+
+"Single Value
+DATA: w_system(20),
+      w_success_con TYPE c,
+      w_suc TYPE i,
+      w_err TYPE i,
+      w_all TYPE i,
+      l_str TYPE string.
+
+"Error message
+DATA: exc_ref    TYPE REF TO cx_sy_native_sql_error,
+      error_text TYPE string.
+
+"Print
+DATA: BEGIN OF wa_print,
+        kunnr TYPE kna1-kunnr,                                  "客戶編號
+        name(50),                                               "客戶名稱
+        sortl TYPE kna1-sortl,                                  "搜尋條件一
+        credit_sgmnt TYPE ukmbp_cms_sgm-credit_sgmnt,           "信用區段
+        credit_sgmnt_txt TYPE ukmcred_sgm0t-credit_sgmnt_txt,   "信用區段名稱
+        vkorg TYPE knvv-vkorg,                                  "銷售組織
+        spart TYPE knvv-spart,                                  "部門
+        vtext TYPE tspat-vtext,                                 "部門名稱
+        waers TYPE knvv-waers,                                  "幣別
+        credit_limit TYPE  ukmbp_cms_sgm-credit_limit,          "信用設定額度
+        credit_actual TYPE ukm_sgm_amount,                      "已使用額度
+        datum TYPE sy-datum,                                    "處理日期
+        uzeit(8),                                               "處理時間
+        status(3),                                              "回傳狀態
+        error_message(100),                                     "錯誤訊息
+      END OF wa_print,
+      t_print LIKE STANDARD TABLE OF wa_print.
+
+"From CDB
+DATA: BEGIN OF wa_data,
+        flag TYPE char1,
+        style  TYPE lvc_t_styl.
+        INCLUDE STRUCTURE wa_print.
+DATA: END OF wa_data,
+      t_data LIKE STANDARD TABLE OF wa_data.
+
+"ALV delete
+DATA: lwa_del LIKE wa_data,
+      lt_del LIKE STANDARD TABLE OF lwa_del.
+
+ "Customer Name
+DATA: BEGIN OF wa_kna1,
+        kunnr TYPE kna1-kunnr,
+        name1 TYPE kna1-name1,
+        name2 TYPE kna1-name2,
+      END OF wa_kna1,
+      t_kna1 LIKE STANDARD TABLE OF wa_kna1.
+
+"Spart Name
+DATA: BEGIN OF wa_tspat,
+        spart TYPE tspat-spart,
+        vtext TYPE tspat-vtext,
+      END OF wa_tspat,
+      t_tspat LIKE STANDARD TABLE OF wa_tspat.
+
+"default
+DATA: BEGIN OF wa_usr05,
+        bname TYPE usr05-bname,
+        parid TYPE usr05-parid,
+        parva TYPE usr05-parva,
+      END OF wa_usr05,
+      t_usr05 LIKE STANDARD TABLE OF wa_usr05.
+
+"Credit Segement, Credit Limit
+DATA: BEGIN OF wa_credit,
+        partner TYPE ukmbp_cms_sgm-partner,
+        credit_sgmnt TYPE ukmbp_cms_sgm-credit_sgmnt,          "遇到部門T110 顯示後兩碼 其他顯示部門
+        credit_limit TYPE ukmbp_cms_sgm-credit_limit,
+        credit_sgmnt_txt TYPE ukmcred_sgm0t-credit_sgmnt_txt, "傳送這一段
+      END OF wa_credit,
+      t_credit LIKE STANDARD TABLE OF wa_credit.
+
+"s_cre used
+DATA: BEGIN OF wa_cre,
+        credit_sgmnt TYPE ukmcred_sgm0t-credit_sgmnt,
+        credit_sgmnt_txt TYPE ukmcred_sgm0t-credit_sgmnt_txt,
+      END OF wa_cre,
+      t_cre LIKE STANDARD TABLE OF wa_cre.
+
+
+DATA: t_tvta  LIKE STANDARD TABLE OF tvta,
+      wa_tvta LIKE tvta.
+
+DATA: wa_zutm10 LIKE zutm10,
+      t_zutm10 LIKE STANDARD TABLE OF zutm10.
+
+"ALV Components
+DATA: t_fieldcat    TYPE lvc_t_fcat,
+      wa_fieldcat    TYPE lvc_s_fcat,
+
+      t_sortable    TYPE lvc_t_sort,
+      wa_sortable TYPE lvc_s_sort,
+
+      gs_layout      TYPE lvc_s_layo,
+      w_settings    TYPE lvc_s_glay,
+      t_top_of_page TYPE slis_t_listheader,
+      w_top_of_page LIKE LINE OF t_top_of_page,
+      t_events      TYPE slis_t_event,
+      w_event       LIKE LINE OF t_events,
+
+      ls_stylerow TYPE lvc_s_styl,
+      lt_styletab TYPE lvc_t_styl,
+
+      wa_prv        LIKE wa_print,
+      w_auth(1),
+      w_lines(10),
+      w_lines_i(10).
+
+***********************************************************************
+* Selection Screen / Option / Parameter
+***********************************************************************
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN COMMENT (32) TEXT-r01.
+PARAMETERS p_upload RADIOBUTTON GROUP rad DEFAULT 'X' USER-COMMAND a.
+SELECTION-SCREEN COMMENT (24) TEXT-r02.
+PARAMETERS p_search RADIOBUTTON GROUP rad.
+SELECTION-SCREEN COMMENT (24) TEXT-r03.
+SELECTION-SCREEN END OF LINE.
+
+
+"Upload
+RANGES: s_cre FOR ukmbp_cms_sgm-credit_sgmnt.
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN COMMENT (33) text-r04 MODIF ID g1.
+PARAMETERS: p_cre TYPE ukmbp_cms_sgm-credit_sgmnt AS LISTBOX VISIBLE LENGTH 15 MODIF ID g1.
+SELECTION-SCREEN POSITION 60.
+PARAMETERS: p_cre2 TYPE ukmbp_cms_sgm-credit_sgmnt AS LISTBOX VISIBLE LENGTH 15 MODIF ID g1.
+SELECTION-SCREEN END OF LINE.
+SELECT-OPTIONS: s_kunnr FOR kna1-kunnr MODIF ID g1.
+
+"Search
+RANGES: s_cre2 FOR ukmbp_cms_sgm-credit_sgmnt.
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN COMMENT (33) text-r05 MODIF ID g2.
+PARAMETERS: p_cre3 TYPE ukmbp_cms_sgm-credit_sgmnt AS LISTBOX VISIBLE LENGTH 15 MODIF ID g2.
+SELECTION-SCREEN POSITION 60.
+PARAMETERS: p_cre4 TYPE ukmbp_cms_sgm-credit_sgmnt NO-DISPLAY.
+SELECTION-SCREEN END OF LINE.
+SELECT-OPTIONS: s_kunnr2 FOR kna1-kunnr MODIF ID g2 NO-EXTENSION,
+                s_datum FOR kna1-erdat MODIF ID g2 NO-EXTENSION,
+                s_status FOR kna1-pstlz NO INTERVALS NO-EXTENSION MODIF ID g2.
